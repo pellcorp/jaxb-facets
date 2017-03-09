@@ -64,6 +64,10 @@ import com.sun.xml.txw2.output.ResultFactory;
 import com.sun.xml.txw2.output.TXWResult;
 import com.sun.xml.txw2.output.TXWSerializer;
 
+import com.sun.xml.bind.v2.model.runtime.RuntimeElementPropertyInfo;
+import com.sun.xml.bind.v2.runtime.reflect.Accessor;
+import com.sun.xml.bind.v2.runtime.reflect.Accessor.GetterSetterReflection;
+
 /**
  * @author Waldemar Hummer (hummer@infosys.tuwien.ac.at)
  * @version 0.2 added support for Facet restrictions for XML attributes
@@ -913,26 +917,93 @@ public class XmlSchemaEnhancer {
         return null;
     }
 
+    // jpell
+    private static Annotation unwrapProxy(Annotation annotation, Class<? extends Annotation> annoClass) {
+    	if (annotation instanceof Proxy) {
+            try {
+                Object handler = Proxy.getInvocationHandler(annotation);
+                if (handler instanceof InvocationHandler) {
+                    Annotation annoObj = convertToAnnotation((InvocationHandler) handler, annoClass);
+                    return (Annotation) annoObj;
+                }
+            } catch (Exception e) {
+                /* swallow */
+            }
+        }
+    	return annotation;
+    }
+    
+    // only handles properties, not fields
+    private static <T, C> Object readAnnotation(PropertyInfo<T, C> info, 
+    		Class<? extends Annotation> annoClass) {
+    	Annotation result = info.readAnnotation(annoClass);
+    	if (result != null) {
+    		return result;
+    	}
+    	
+    	if (info instanceof RuntimeElementPropertyInfo) {
+	    	RuntimeElementPropertyInfo propertyImpl = (RuntimeElementPropertyInfo) info;
+			Accessor accessor = propertyImpl.getAccessor();
+			if (accessor instanceof GetterSetterReflection) {
+				GetterSetterReflection reflect = (GetterSetterReflection) accessor;
+				Method method = reflect.getter;
+				Annotation[] annotations = method.getDeclaredAnnotations();
+				for (Annotation annotation : annotations) {
+					if (annoClass == Facets.class && isInstanceOf(annotation, Facets.class)) {
+						Facets facets = (Facets) unwrapProxy(annotation, annoClass);
+		                return facets;
+					} else if (annoClass == MaxOccurs.class && isInstanceOf(annotation, MaxOccurs.class)) {
+						MaxOccurs maxOccurs = (MaxOccurs) unwrapProxy(annotation, annoClass);
+		                return maxOccurs;
+					} else if (annoClass == MinOccurs.class && isInstanceOf(annotation, MinOccurs.class)) {
+						MinOccurs minOccurs = (MinOccurs) unwrapProxy(annotation, annoClass);
+		                return minOccurs;
+					} else if (annoClass == Documentation.class && isInstanceOf(annotation, Documentation.class)) {
+						Documentation documentation = (Documentation) unwrapProxy(annotation, annoClass);
+		                return documentation;
+					} else if (annoClass == AppInfo.class && isInstanceOf(annotation, AppInfo.class)) {
+						AppInfo appInfo = (AppInfo) unwrapProxy(annotation, annoClass);
+		                return appInfo;
+					}
+				}
+			}
+    	}
+    	return null;
+    }
+    // end jpell
+
     private static <T, C> Object getAnnotationOfProperty(
-            PropertyInfo<T, C> info, Class<? extends Annotation> annoClass)
-            throws Exception {
+            PropertyInfo<T, C> info, Class<? extends Annotation> annoClass) throws Exception {
         if (annoClass == Facets.class) {
-            Object result = facetFilter.filterAnnotation(annoClass, info.readAnnotation(Facets.class), info);
+        	Facets facets = (Facets) readAnnotation(info, annoClass);
+            Object result = facetFilter.filterAnnotation(annoClass, facets, info);
         	if (result != null) {
                 return result;
             }
-        } else if (annoClass == MaxOccurs.class && info.hasAnnotation(MaxOccurs.class)) {
-            return info.readAnnotation(MaxOccurs.class);
+        } else if (annoClass == MaxOccurs.class) {
+        	MaxOccurs maxOccurs = (MaxOccurs) readAnnotation(info, annoClass);
+        	if (maxOccurs != null) {
+        		return maxOccurs;
+        	}
         } else if (annoClass == MinOccurs.class) {
-            Object result = facetFilter.filterAnnotation(annoClass, info.readAnnotation(MinOccurs.class), info);
+        	MinOccurs minOccurs = (MinOccurs) readAnnotation(info, annoClass);
+            Object result = facetFilter.filterAnnotation(annoClass, minOccurs, info);
             if (result != null) {
                 return result;
             }
-        } else if (annoClass == Documentation.class && info.hasAnnotation(Documentation.class)) {
-            return info.readAnnotation(Documentation.class);
-        } else if (annoClass == AppInfo.class && info.hasAnnotation(AppInfo.class)) {
-            return info.readAnnotation(AppInfo.class);
-        } else if (info.parent() == null) {
+        } else if (annoClass == Documentation.class) {
+        	Documentation documentation = (Documentation) readAnnotation(info, annoClass);
+        	if (documentation != null) {
+        		return documentation;
+        	}
+        } else if (annoClass == AppInfo.class) {
+        	AppInfo appInfo = (AppInfo) readAnnotation(info, annoClass);
+        	if (appInfo != null) {
+        		return appInfo;
+        	}
+        }
+        
+        if (info.parent() == null) {
             return null;
         } else if (!(info.parent().getType() instanceof Class<?>)) {
             return null;
@@ -1028,14 +1099,44 @@ public class XmlSchemaEnhancer {
         return null;
     }
 
+    // jpell
+    private static <T extends Annotation> boolean isInstanceOf(Annotation anno, final Class<T> annoClass) {
+    	if (anno instanceof Proxy) {
+			try {
+                Object handler = Proxy.getInvocationHandler(anno);
+                if (handler instanceof InvocationHandler) {
+                	Field f1 = handler.getClass().getDeclaredField("type");
+                    f1.setAccessible(true);
+                    final Class<?> type = (Class<?>) f1.get(handler);
+                    
+                    if (annoClass.getName().equals(type.getName())) {
+                    	return true;
+                    }
+                    
+                }
+            } catch (Exception e) {
+                /* swallow */
+            }
+    	}
+    	
+    	if (annoClass.equals(anno.getClass())
+                || annoClass.isAssignableFrom(anno.getClass())) {
+            return true;
+        } else {
+        	return false;
+        }
+    }
+    // end jpell
+    
     private static <T extends Annotation> T convertToAnnotation(
             final InvocationHandler handler, final Class<T> expectedClass) {
         try {
-            Field f = InvocationHandler.class.getDeclaredField("memberValues");
+            Field f = handler.getClass().getDeclaredField("memberValues");
             f.setAccessible(true);
             Map<String, Object> memberValues = (Map<String, Object>) f
-                    .get(handler);
-            Field f1 = InvocationHandler.class.getDeclaredField("type");
+            		.get(handler);
+            Field f1 = handler.getClass().getDeclaredField("type");
+            f1.setAccessible(true);
             f1.setAccessible(true);
             final Class<?> type = (Class<?>) f1.get(handler);
             if (!expectedClass.getName().equals(type.getName())) {

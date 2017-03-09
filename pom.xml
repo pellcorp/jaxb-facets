@@ -27,7 +27,7 @@
 		<maven.compiler.target>1.6</maven.compiler.target>
 
 		<jaxb.facets.api.version>2.2.11-facets-1.1.0</jaxb.facets.api.version>
-		<jaxb.facets.impl.version>2.2.11-facets-1.4.0</jaxb.facets.impl.version>
+		<jaxb.facets.impl.version>2.2.11-facets-1.4.0-eclipse</jaxb.facets.impl.version>
 	</properties>
 
 	<build>
@@ -85,6 +85,13 @@
 			</plugin>
 		</plugins>
 	</build>
+
+    <distributionManagement>
+		<repository>
+			<id>repo</id>
+			<url>${maven.repo.dir}/releases</url>
+		</repository>
+    </distributionManagement>
 
 	<parent>
         <groupId>net.java</groupId>
